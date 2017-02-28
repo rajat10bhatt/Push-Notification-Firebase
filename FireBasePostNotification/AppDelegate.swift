@@ -143,6 +143,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 print("Unable to connect with FCM. \(error)")
             } else {
                 print("Connected to FCM.")
+                if let token = FIRInstanceID.instanceID().token() {
+                    print("InstanceID token: \(token)")
+                    FIRMessaging.messaging().subscribe(toTopic: "/topics/post")
+                    print("Subscribed to news topic")
+                }
+                
             }
         }
     }
