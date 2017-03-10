@@ -20,11 +20,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     let gcmMessageIDKey = "gcm.message_id"
     
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey: Any]?) -> Bool {
+        if let lo = launchOptions {
+            let notification_details: NSDictionary = lo[UIApplicationLaunchOptionsKey.remoteNotification] as! NSDictionary
+            debugPrint(notification_details)
+            self.scheduleNotification(userInfo: notification_details as! [AnyHashable : Any])
+        }
         // Register for remote notifications. This shows a permission dialog on first run, to
         // show the dialog at a more appropriate time move this registration accordingly.
         // [START register_for_notifications]
         if #available(iOS 10.0, *) {
             let authOptions: UNAuthorizationOptions = [.alert, .badge, .sound]
+            configureUserNotification()
             UNUserNotificationCenter.current().requestAuthorization(
                 options: authOptions,
                 completionHandler: {_, _ in })
@@ -56,9 +62,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         print("APNs token retrieved: \(deviceToken)")
-        
+        let deviceTokenString = deviceToken.reduce("", {$0 + String(format: "%02X", $1)})
+        print("Device token string: \(deviceTokenString)")
+        FIRMessaging.messaging().subscribe(toTopic: "/topics/post")
+        print("Subscribed to news topic")
         // With swizzling disabled you must set the APNs token here.
-        // FIRInstanceID.instanceID().setAPNSToken(deviceToken, type: FIRInstanceIDAPNSTokenType.sandbox)
+        FIRInstanceID.instanceID().setAPNSToken(deviceToken, type: FIRInstanceIDAPNSTokenType.sandbox)
+        FIRInstanceID.instanceID().setAPNSToken(deviceToken, type: FIRInstanceIDAPNSTokenType.prod)
+    }
+    
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("Unable to register for remote notifications: \(error.localizedDescription)")
     }
     
     // [START receive_message]
@@ -78,6 +92,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         
         // Print full message.
         print(userInfo)
+        //scheduleNotification(userInfo: userInfo)
     }
     
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
@@ -91,10 +106,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             print("Message ID: \(messageID)")
         }
         
+        if let imageURL = userInfo["image"] {
+            print(imageURL)
+        }
+        
         // Print full message.
         print(userInfo)
-        
-        completionHandler(UIBackgroundFetchResult.newData)
+        //scheduleNotification(userInfo: userInfo)
+        DispatchQueue.main.async {
+            completionHandler(UIBackgroundFetchResult.newData)
+        }
+        //completionHandler(UIBackgroundFetchResult.newData)
     }
     
     func applicationWillResignActive(_ application: UIApplication) {
@@ -103,8 +125,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
     
     func applicationDidEnterBackground(_ application: UIApplication) {
-//        FIRMessaging.messaging().disconnect()
-//        print("Disconnected from FCM.")
+        FIRMessaging.messaging().disconnect()
+        print("Disconnected from FCM.")
     }
     
     func applicationWillEnterForeground(_ application: UIApplication) {
@@ -128,6 +150,56 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         connectToFcm()
     }
     
+    private func configureUserNotification() {
+        if #available(iOS 10.0, *) {
+            let action = UNNotificationAction(identifier: "dismiss", title: "Cancel", options: [])
+            let category = UNNotificationCategory(identifier: "myNotificationCategory", actions: [action], intentIdentifiers: [], options: [])
+            UNUserNotificationCenter.current().setNotificationCategories([category])
+        } else {
+            // Fallback on earlier versions
+        }
+        
+    }
+    
+    func scheduleNotification(userInfo: [AnyHashable : Any]) {
+        //        let calendar = Calendar(identifier: .gregorian)
+        //        let components = calendar.dateComponents(in: .current, from: date)
+        //        let newComponents = DateComponents(calendar: calendar, timeZone: .current, month: components.month, day: components.day, hour: components.hour, minute: components.minute)
+        
+        if #available(iOS 10.0, *) {
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 02, repeats: false)
+            let content = UNMutableNotificationContent()
+            content.categoryIdentifier = "myNotificationCategory"
+            //let notification = userInfo["notification"] as! [String: Any]
+            content.title =  userInfo["title"] as! String
+            content.body = userInfo["text"] as! String
+            content.sound = UNNotificationSound.default()
+            content.userInfo = userInfo
+            
+            //            //if let path = Bundle.main.path(forResource: "logo", ofType: "png") {
+            //            let url = URL(fileURLWithPath: userInfo["image"] as! String)
+            //
+            //            do {
+            //                let attachment = try UNNotificationAttachment(identifier: "myNotificationCategory", url: url, options: nil)
+            //                content.attachments = [attachment]
+            //            } catch {
+            //                print("The attachment was not loaded.")
+            //            }
+            //            //}
+            
+            let request = UNNotificationRequest(identifier: "textNotification", content: content, trigger: trigger)
+            
+            UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+            UNUserNotificationCenter.current().add(request) {(error) in
+                if let error = error {
+                    print("Uh oh! We had an error: \(error)")
+                }
+            }
+        } else {
+            // Fallback on earlier versions
+        }
+    }
+    
     // [START connect_to_fcm]
     func connectToFcm() {
         // Won't connect since there is no token
@@ -143,18 +215,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 print("Unable to connect with FCM. \(error)")
             } else {
                 print("Connected to FCM.")
-                if let token = FIRInstanceID.instanceID().token() {
-                    print("InstanceID token: \(token)")
-                    FIRMessaging.messaging().subscribe(toTopic: "/topics/post")
-                    print("Subscribed to news topic")
-                }
-                
             }
         }
-    }
-    
-    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("Unable to register for remote notifications: \(error.localizedDescription)")
     }
 }
 
@@ -174,14 +236,15 @@ extension AppDelegate : UNUserNotificationCenterDelegate {
         
         // Print full message.
         print(userInfo)
-        
+        //scheduleNotification(userInfo: userInfo)
         // Change this to your preferred presentation option
-        completionHandler([])
+        completionHandler([.alert])
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        print(response.actionIdentifier)
         let userInfo = response.notification.request.content.userInfo
         // Print message ID.
         if let messageID = userInfo[gcmMessageIDKey] {
@@ -190,7 +253,7 @@ extension AppDelegate : UNUserNotificationCenterDelegate {
         
         // Print full message.
         print(userInfo)
-        
+        //scheduleNotification(userInfo: userInfo)
         completionHandler()
     }
 }
@@ -199,8 +262,8 @@ extension AppDelegate : UNUserNotificationCenterDelegate {
 extension AppDelegate : FIRMessagingDelegate {
     // Receive data message on iOS 10 devices while app is in the foreground.
     func applicationReceivedRemoteMessage(_ remoteMessage: FIRMessagingRemoteMessage) {
-        print(remoteMessage)
         print(remoteMessage.appData)
+        //scheduleNotification(userInfo: remoteMessage.appData)
     }
 }
 // [END ios_10_data_message_handling]
